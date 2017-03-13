@@ -7,7 +7,8 @@
    [pl.danieljanus.tagsoup :as tagsoup]
    [cheshire.core          :as json])
   (:import
-   (java.util Date)))
+   (java.util Date)
+   (java.net URLEncoder)))
 
 (def user-agent "Mozilla/5.0 (Windows NT 10.0; WOW64; rv:50.0) Gecko/20100101 Firefox/50.0")
 (def headers {"User-Agent"                user-agent
@@ -16,7 +17,13 @@
               "Upgrade-Insecure-Requests" "1"})
 (def ig-base-url "https://www.instagram.com/%s/")
 (def ig-post-url "https://www.instagram.com/p/%s/")
+(def ig-search-url "https://www.instagram.com/web/search/topsearch/?context=blended&query=%s")
 (def shared-data-ptrn (re-pattern "window._sharedData = (\\{[^\\n]*\\});"))
+
+(defn url-encode [s]
+  (-> s
+      (URLEncoder/encode "UTF-8")
+      (.replace "+" "%20")))
 
 (defn shared-data [html]
   (let [[_ _ _ [_ _ & tags]] html]
@@ -112,3 +119,19 @@
           {:error {:status  status
                    :headers headers
                    :body    body}})))))
+
+(defn search-users [query]
+  (let [url                          (format ig-search-url (url-encode query))
+        {:keys [status header body]} (client/get url {:headers headers})]
+    (if (= 200 status)
+      (map (fn [{:strs [user]}]
+             {:username    (get user "username")
+              :full-name   (get user "full_name")
+              :verified?   (get user "is_verified")
+              :private?    (get user "is_private")
+              :followers   (get user "follower_count")
+              :profile-pic (get user "profile_pic_url")})
+           (-> body json/parse-string (get "users")))
+      {:error {:status  status
+               :headers headers
+               :body    body}})))
