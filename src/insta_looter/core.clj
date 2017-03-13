@@ -40,28 +40,41 @@
    :code          (get node "code")
    :likes         (get-in node ["likes" "count"])})
 
-(defn translate-profile [data n]
-  (let [profile (get-in data ["entry_data" "ProfilePage" 0 "user"])]
-    {:id             (get profile "id")
-     :username       (get profile "username")
-     :full-name      (get profile "full_name")
-     :private?       (get profile "is_private")
-     :verified?      (get profile "is_verified")
-     :follows        (get-in profile ["follows" "count"])
-     :followed-by    (get-in profile ["followed_by" "count"])
-     :fb-page        (get profile "connected_fb_page")
-     :profile-pic    (get profile "profile_pic_url")
-     :profile-pic-hd (get profile "profile_pic_url_hd")
-     :homepage       (get profile "external_url")
-     :biography      (get profile "biography")
-     :media          (map translate-media (get-in profile ["media" "nodes"]))}))
+(defn update-profile [profile data]
+  (cond-> profile
+    (empty? profile) (assoc :id             (get data "id")
+                            :username       (get data "username")
+                            :full-name      (get data "full_name")
+                            :private?       (get data "is_private")
+                            :verified?      (get data "is_verified")
+                            :follows        (get-in data ["follows" "count"])
+                            :followed-by    (get-in data ["followed_by" "count"])
+                            :fb-page        (get data "connected_fb_page")
+                            :profile-pic    (get data "profile_pic_url")
+                            :profile-pic-hd (get data "profile_pic_url_hd")
+                            :homepage       (get data "external_url")
+                            :biography      (get data "biography")
+                            :posts          (get-in data ["media" "count"]))
+    :always          (update :media concat
+                             (map translate-media (get-in data ["media" "nodes"])))))
 
 (defn loot-profile [username n]
-  (let [profile-url (format ig-base-url username)]
-    (binding [clj-http/*cookie-store* (cookies/cookie-store)]
-      (let [{:keys [status headers body]} (client/get profile-url {:headers headers})]
+  (binding [clj-http/*cookie-store* (cookies/cookie-store)]
+    (loop [profile {} url (format ig-base-url username)]
+      (let [{:keys [status headers body]} (client/get url {:headers headers})]
         (if (= 200 status)
-          (translate-profile (shared-data (tagsoup/parse-string body)) n)
-          {:error {:status  status
-                   :headers headers
-                   :body    body}})))))
+          (let [profile-page (-> body
+                                 tagsoup/parse-string
+                                 shared-data
+                                 (get-in ["entry_data" "ProfilePage" 0 "user"]))
+                has-more?    (get-in profile-page ["media" "page_info" "has_next_page"])
+                profile      (update-profile profile profile-page)]
+            (if (and has-more? (< (count (:media profile)) n))
+              (recur profile (str (format ig-base-url username)
+                                  "?max_id="
+                                  (get-in profile-page ["media" "page_info" "end_cursor"])))
+              profile))
+          {:error   {:status  status
+                     :headers headers
+                     :body    body}
+           :profile profile})))))
