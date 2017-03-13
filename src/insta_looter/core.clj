@@ -15,6 +15,7 @@
               "DNT"                       "1"
               "Upgrade-Insecure-Requests" "1"})
 (def ig-base-url "https://www.instagram.com/%s/")
+(def ig-post-url "https://www.instagram.com/p/%s/")
 (def shared-data-ptrn (re-pattern "window._sharedData = (\\{[^\\n]*\\});"))
 
 (defn shared-data [html]
@@ -27,6 +28,18 @@
          last
          json/parse-string)))
 
+(defn parse-date [raw-date]
+  (Date. (* raw-date 1000)))
+
+(defn translate-comments [{:strs [count nodes]}]
+  (cond-> {:count count}
+    nodes (assoc :posts (map (fn [node]
+                               {:text (get node "text")
+                                :date (parse-date (get node "created_at"))
+                                :user {:id       (get-in node ["user" "id"])
+                                       :username (get-in node ["user" "username"])}})
+                             nodes))))
+
 (defn translate-media [node]
   {:id            (get node "id")
    :owner         (get-in node ["owner" "id"])
@@ -34,8 +47,8 @@
    :thumbnail-url (get node "thumbnail_src")
    :url           (get node "display_src")
    :dimensions    (keywordize-keys (get node "dimensions"))
-   :comments      (get-in node ["comments" "count"])
-   :date          (Date. (* (get node "date") 1000))
+   :comments      (translate-comments (get node "comments"))
+   :date          (parse-date (get node "date"))
    :caption       (get node "caption")
    :code          (get node "code")
    :likes         (get-in node ["likes" "count"])})
@@ -78,3 +91,24 @@
                      :headers headers
                      :body    body}
            :profile profile})))))
+
+(defn loot-post [code]
+  (let [url (format ig-post-url code)]
+    (binding [clj-http/*cookie-store* (cookies/cookie-store)]
+      (let [{:keys [status headers body]} (client/get url {:headers headers})]
+        (if (= 200 status)
+          (let [media-page (-> body
+                               tagsoup/parse-string
+                               shared-data
+                               (get-in ["entry_data" "PostPage" 0 "media"]))
+                profile    {:id          (get-in media-page ["owner" "id"])
+                            :username    (get-in media-page ["owner" "username"])
+                            :full-name   (get-in media-page ["owner" "full_name"])
+                            :private?    (get-in media-page ["owner" "is_private"])
+                            :profile-pic (get-in media-page ["owner" "profile_pic_url"])}
+                post       (translate-media media-page)]
+            {:profile profile
+             :post    post})
+          {:error {:status  status
+                   :headers headers
+                   :body    body}})))))
