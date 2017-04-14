@@ -6,6 +6,10 @@ Instagram API is very limited (at least until they approve your application). I 
 
 **Warning: since this library doesn't use API, it might stop working if Instagram changes how their website works.**
 
+### Current version:
+
+[![Clojars Project](https://img.shields.io/clojars/v/insta-looter.svg)](https://clojars.org/insta-looter)
+
 ## Usage
 
 ### Retrieve user profile and n latest posts
