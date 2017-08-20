@@ -1,4 +1,4 @@
-(defproject insta-looter "0.1.1"
+(defproject insta-looter "0.1.2"
   :description "API-less Instagram scrapper"
   :url "https://github.com/stask/insta-looter/"
   :license {:name "Eclipse Public License"

@@ -25,6 +25,9 @@
       (URLEncoder/encode "UTF-8")
       (.replace "+" "%20")))
 
+
+;; instead of just taking first or second script tag
+;; take the one that has shared data
 (defn shared-data [html]
   (let [[_ _ _ [_ _ & tags]] html]
     (->> tags
@@ -36,29 +39,45 @@
          json/parse-string)))
 
 (defn parse-date [raw-date]
-  (Date. (* raw-date 1000)))
+  (when raw-date (Date. (* raw-date 1000))))
 
-(defn translate-comments [{:strs [count nodes]}]
+(defn translate-comments [{:strs [count nodes edges]}]
   (cond-> {:count count}
     nodes (assoc :posts (map (fn [node]
                                {:text (get node "text")
                                 :date (parse-date (get node "created_at"))
                                 :user {:id       (get-in node ["user" "id"])
                                        :username (get-in node ["user" "username"])}})
-                             nodes))))
+                             nodes))
+    edges (assoc :posts (map (fn [edge]
+                               {:text (get-in edge ["node" "text"])
+                                :date (parse-date (get-in edge ["node" "created_at"]))
+                                :user {:id       (get-in edge ["node" "owner" "id"])
+                                       :username (get-in edge ["node" "owner" "id"])}})
+                             edges))))
 
 (defn translate-media [node]
   {:id            (get node "id")
    :owner         (get-in node ["owner" "id"])
    :video?        (get node "is_video")
    :thumbnail-url (get node "thumbnail_src")
-   :url           (get node "display_src")
+   :url           (or (get node "display_url")
+                      (get node "display_src"))
    :dimensions    (keywordize-keys (get node "dimensions"))
-   :comments      (translate-comments (get node "comments"))
-   :date          (parse-date (get node "date"))
-   :caption       (get node "caption")
-   :code          (get node "code")
-   :likes         (get-in node ["likes" "count"])})
+   :comments      (translate-comments (or (get node "edge_media_to_comment")
+                                          (get node "comments")))
+   :date          (parse-date (or (get node "taken_at_timestamp")
+                                  (get node "date")))
+   :caption       (or (get-in node ["edge_media_to_caption" "edges" 0 "node" "text"])
+                      (get node "caption"))
+   :code          (or (get node "shortcode")
+                      (get node "code"))
+   :likes         (or (get-in node ["edge_media_preview_like" "count"])
+                      (get-in node ["likes" "count"]))
+   :location      (when-let [location (get node "location")]
+                    {:id   (get location "id")
+                     :name (get location "name")
+                     :slug (get location "slug")})})
 
 (defn update-profile [profile data]
   (cond-> profile
@@ -107,7 +126,7 @@
           (let [media-page (-> body
                                tagsoup/parse-string
                                shared-data
-                               (get-in ["entry_data" "PostPage" 0 "media"]))
+                               (get-in ["entry_data" "PostPage" 0 "graphql" "shortcode_media"]))
                 profile    {:id          (get-in media-page ["owner" "id"])
                             :username    (get-in media-page ["owner" "username"])
                             :full-name   (get-in media-page ["owner" "full_name"])
